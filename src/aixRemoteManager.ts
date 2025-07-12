@@ -56,14 +56,18 @@ export class AIXRemoteManager {
                 console.log('SSH connection established');
                 
                 try {
-                    // For now, let's skip auto-deployment and just try direct connection
-                    console.log('Trying WebSocket connection...');
+                    // Ensure server is running with auto-deployment
+                    console.log('Ensuring server is running...');
+                    await this.ensureServerRunning();
+                    
+                    // Then connect via WebSocket
+                    console.log('Connecting to WebSocket...');
                     await this.connectWebSocket();
                     
                     this.connected = true;
                     resolve();
                 } catch (error) {
-                    console.error('WebSocket connection failed:', error);
+                    console.error('Connection failed:', error);
                     reject(error);
                 }
             });
@@ -183,39 +187,31 @@ export class AIXRemoteManager {
             throw new Error('No SSH connection');
         }
 
-        return new Promise((resolve, reject) => {
-            // Check if server is already running
-            this.sshClient!.exec('pgrep -f "node.*server.js" && echo "RUNNING" || echo "NOT_RUNNING"', (err, stream) => {
-                if (err) {
-                    reject(err);
-                    return;
-                }
+        console.log('=== Ensuring server is running ===');
+        
+        // Step 1: Check if server is already running
+        try {
+            console.log('Step 1: Testing if server is already running...');
+            await this.testServerConnection();
+            console.log('✅ Server already running and responding');
+            return;
+        } catch (error) {
+            console.log('❌ Server not running, proceeding with deployment...');
+        }
 
-                let output = '';
-                stream.on('data', (data: any) => {
-                    output += data.toString();
-                });
+        // Step 2: Deploy server files
+        console.log('Step 2: Deploying server files...');
+        await this.deployServerFiles();
 
-                stream.on('close', async () => {
-                    if (output.includes('RUNNING')) {
-                        console.log('Server already running');
-                        // Check if server responds
-                        try {
-                            await this.testServerConnection();
-                            resolve();
-                        } catch (error) {
-                            console.log('Server not responding, restarting...');
-                            await this.deployAndStartServer();
-                            resolve();
-                        }
-                    } else {
-                        console.log('Server not running, deploying...');
-                        await this.deployAndStartServer();
-                        resolve();
-                    }
-                });
-            });
-        });
+        // Step 3: Start server
+        console.log('Step 3: Starting server...');
+        await this.startRemoteServer();
+
+        // Step 4: Wait for server to be ready
+        console.log('Step 4: Waiting for server to be ready...');
+        await this.waitForServerReady();
+
+        console.log('✅ Server is running and ready!');
     }
 
     private async testServerConnection(): Promise<void> {
@@ -234,149 +230,206 @@ export class AIXRemoteManager {
             setTimeout(() => {
                 testWs.close();
                 reject(new Error('Connection timeout'));
-            }, 3000);
+            }, 5000);
         });
     }
 
-    private async deployAndStartServer(): Promise<void> {
-        if (!this.sshClient) {
-            throw new Error('No SSH connection');
-        }
+    private async deployServerFiles(): Promise<void> {
+        try {
+            // Create remote directory structure first via SSH
+            console.log('Creating remote directory structure...');
+            await this.execCommand('mkdir -p ~/.aix-remote');
 
-        return new Promise((resolve, reject) => {
-            // Create .aix-remote directory and check if server exists
-            this.sshClient!.exec('mkdir -p ~/.aix-remote && cd ~/.aix-remote && ls -la', (err, stream) => {
-                if (err) {
-                    reject(err);
-                    return;
-                }
+            // Get local server paths
+            const serverDistPath = path.join(__dirname, '../server/dist');
+            const packageJsonPath = path.join(__dirname, '../server/package.json');
 
-                let output = '';
-                stream.on('data', (data: any) => {
-                    output += data.toString();
-                });
-
-                stream.on('close', async () => {
-                    try {
-                        if (!output.includes('dist') || !output.includes('package.json')) {
-                            console.log('Deploying server files...');
-                            await this.uploadServerFiles();
-                        }
-                        
-                        console.log('Starting server...');
-                        await this.startServer();
-                        resolve();
-                    } catch (error) {
-                        reject(error);
-                    }
-                });
-            });
-        });
-    }
-
-    private async uploadServerFiles(): Promise<void> {
-        if (!this.sshClient) {
-            throw new Error('No SSH connection');
-        }
-
-        return new Promise((resolve, reject) => {
-            // Get server files from local project
-            const serverPath = path.join(__dirname, '..', 'server');
-            const packageJsonPath = path.join(serverPath, 'package.json');
-            const distPath = path.join(serverPath, 'dist');
-
-            if (!fs.existsSync(packageJsonPath) || !fs.existsSync(distPath)) {
-                reject(new Error('Server files not found. Run "cd server && npm run build" first.'));
-                return;
+            // Check if local files exist
+            if (!fs.existsSync(serverDistPath)) {
+                throw new Error(`Server dist not found at: ${serverDistPath}. Run 'npm run build' in server directory first.`);
             }
 
-            // Upload package.json
-            const packageJson = fs.readFileSync(packageJsonPath, 'utf8');
-            this.sshClient!.exec(`cat > ~/.aix-remote/package.json << 'EOF'
-${packageJson}
-EOF`, (err, stream) => {
-                if (err) {
-                    reject(err);
-                    return;
-                }
+            if (!fs.existsSync(packageJsonPath)) {
+                throw new Error(`Server package.json not found at: ${packageJsonPath}.`);
+            }
 
-                stream.on('close', async () => {
+            // Use SCP to copy files (skip node_modules - we'll install remotely)
+            console.log('Copying dist folder via SCP...');
+            await this.scpCopy(serverDistPath, `${this.username}@${this.host}:~/.aix-remote/`);
+
+            console.log('Copying package.json via SCP...');
+            await this.scpCopy(packageJsonPath, `${this.username}@${this.host}:~/.aix-remote/`);
+
+            // Install dependencies remotely (much faster than copying)
+            console.log('Installing dependencies on remote machine...');
+            await this.execCommandWithTimeout('cd ~/.aix-remote && export PATH="/opt/nodejs/bin:$PATH" && npm install --production', 120000); // 2 minute timeout
+
+            console.log('✅ Server files deployed successfully');
+
+        } catch (error) {
+            console.error('❌ Server deployment failed:', error);
+            throw error;
+        }
+    }
+
+    private async scpCopy(localPath: string, remotePath: string): Promise<void> {
+        const { spawn } = require('child_process');
+        
+        return new Promise((resolve, reject) => {
+            // Build SCP command
+            const scpArgs = ['-r', '-o', 'StrictHostKeyChecking=no', localPath, remotePath];
+            
+            console.log(`Running: scp ${scpArgs.join(' ')}`);
+            
+            const child = spawn('scp', scpArgs, { stdio: 'pipe' });
+            
+            let output = '';
+            let errorOutput = '';
+            
+            child.stdout?.on('data', (data: any) => { 
+                output += data.toString(); 
+            });
+            
+            child.stderr?.on('data', (data: any) => { 
+                errorOutput += data.toString(); 
+            });
+            
+            child.on('close', (code: any) => {
+                if (code === 0) {
+                    console.log(`SCP completed successfully for ${localPath}`);
+                    resolve();
+                } else {
+                    const error = `SCP failed with code ${code}. Error: ${errorOutput}`;
+                    console.error(error);
+                    reject(new Error(error));
+                }
+            });
+            
+            child.on('error', (error: any) => { 
+                console.error('SCP process error:', error);
+                reject(error); 
+            });
+        });
+    }
+
+    private async startRemoteServer(): Promise<void> {
+        try {
+            // Kill any existing server processes
+            console.log('Stopping any existing server processes...');
+            await this.execCommand('export PATH="/opt/nodejs/bin:$PATH" && pkill -f "node.*server.js" 2>/dev/null || true');
+            
+            // Wait a moment for processes to die
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // Start server
+            console.log('Starting AIX remote server...');
+            const startCmd = 'cd ~/.aix-remote && export PATH="/opt/nodejs/bin:$PATH" && nohup node dist/server.js > server.log 2>&1 < /dev/null & echo "Server started with PID: $!"';
+            const result = await this.execCommand(startCmd);
+            console.log('Server start result:', result);
+            
+            // Give server time to start
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+        } catch (error) {
+            console.error('❌ Server start failed:', error);
+            throw error;
+        }
+    }
+
+    private async waitForServerReady(): Promise<void> {
+        console.log('Waiting for server to respond...');
+        
+        for (let i = 0; i < 15; i++) {
+            try {
+                console.log(`Testing connection attempt ${i + 1}/15...`);
+                await this.testServerConnection();
+                console.log('🎉 Server is responding!');
+                return;
+            } catch (error) {
+                console.log(`Attempt ${i + 1} failed: ${error instanceof Error ? error.message : String(error)}`);
+                
+                // Show server status after a few attempts
+                if (i === 7) {
                     try {
-                        // Upload server.js
-                        const serverJs = fs.readFileSync(path.join(distPath, 'server.js'), 'utf8');
-                        await this.uploadFile('~/.aix-remote/dist/server.js', serverJs);
+                        const processCheck = await this.execCommand('ps aux | grep "node.*server.js" | grep -v grep || echo "No server process found"');
+                        console.log('Server process check:', processCheck);
                         
-                        // Install dependencies
-                        await this.execCommand('cd ~/.aix-remote && npm install');
-                        resolve();
-                    } catch (error) {
-                        reject(error);
+                        const logContent = await this.execCommand('tail -5 ~/.aix-remote/server.log 2>/dev/null || echo "No log file"');
+                        console.log('Server log:', logContent);
+                    } catch (statusError) {
+                        console.log('Could not check server status');
                     }
-                });
-            });
-        });
-    }
-
-    private async uploadFile(remotePath: string, content: string): Promise<void> {
-        return new Promise((resolve, reject) => {
-            const dir = path.dirname(remotePath);
-            this.sshClient!.exec(`mkdir -p ${dir} && cat > ${remotePath} << 'EOF'
-${content}
-EOF`, (err, stream) => {
-                if (err) {
-                    reject(err);
-                    return;
                 }
-                stream.on('close', () => resolve());
-            });
-        });
-    }
-
-    private async startServer(): Promise<void> {
-        return new Promise((resolve, reject) => {
-            // Start server in background
-            this.sshClient!.exec('cd ~/.aix-remote && nohup node dist/server.js > server.log 2>&1 & echo $!', (err, stream) => {
-                if (err) {
-                    reject(err);
-                    return;
-                }
-
-                let output = '';
-                stream.on('data', (data: any) => {
-                    output += data.toString();
-                });
-
-                stream.on('close', () => {
-                    const pid = output.trim();
-                    console.log(`Server started with PID: ${pid}`);
-                    
-                    // Wait a moment for server to start
-                    setTimeout(() => resolve(), 2000);
-                });
-            });
-        });
+                
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
+        
+        throw new Error('Server failed to respond after 15 attempts');
     }
 
     private async execCommand(command: string): Promise<string> {
+        return this.execCommandWithTimeout(command, 30000); // Default 30s timeout
+    }
+
+    private async execCommandWithTimeout(command: string, timeoutMs: number): Promise<string> {
         return new Promise((resolve, reject) => {
-            this.sshClient!.exec(command, (err, stream) => {
+            if (!this.sshClient) {
+                reject(new Error('No SSH connection'));
+                return;
+            }
+
+            console.log(`Executing: ${command.substring(0, 50)}... (timeout: ${timeoutMs/1000}s)`);
+            
+            this.sshClient.exec(command, { pty: false }, (err, stream) => {
                 if (err) {
+                    console.error('Exec error:', err);
                     reject(err);
                     return;
                 }
 
                 let output = '';
+                let errorOutput = '';
+                
                 stream.on('data', (data: any) => {
-                    output += data.toString();
-                });
-
-                stream.on('close', (code: number) => {
-                    if (code === 0) {
-                        resolve(output);
-                    } else {
-                        reject(new Error(`Command failed with code ${code}: ${output}`));
+                    const text = data.toString();
+                    output += text;
+                    // Show progress for long-running commands
+                    if (text.length > 0) {
+                        console.log('Command output:', text.trim());
                     }
                 });
+                
+                if (stream.stderr) {
+                    stream.stderr.on('data', (data: any) => {
+                        const text = data.toString();
+                        errorOutput += text;
+                        console.log('Command stderr:', text.trim());
+                    });
+                }
+
+                stream.on('close', (code: any) => {
+                    console.log(`Command finished with exit code: ${code}`);
+                    
+                    if (code === 0) {
+                        resolve(output.trim());
+                    } else {
+                        const errorMsg = `Command failed with exit code ${code}. Output: ${output}, Error: ${errorOutput}`;
+                        console.error(errorMsg);
+                        reject(new Error(errorMsg));
+                    }
+                });
+
+                stream.on('error', (streamError: any) => {
+                    console.error('Stream error:', streamError);
+                    reject(streamError);
+                });
+                
+                // Custom timeout
+                setTimeout(() => {
+                    console.error(`Command timeout (${timeoutMs/1000}s)`);
+                    reject(new Error('Command execution timeout'));
+                }, timeoutMs);
             });
         });
     }
