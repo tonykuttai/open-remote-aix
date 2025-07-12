@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+server/node_modules/
+server/dist/
+.vscode/
+
+# Build outputs
+out/
+*.vsix
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/settings.json
+.vscode/launch.json
+
+# Logs
+npm-debug.log*
+*.log
+
+# Runtime
+.env
+.env.local
+
+# Temporary files
+*.tmp
+*.temp

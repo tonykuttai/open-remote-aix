@@ -1,0 +1,91 @@
+{
+  "name": "aix-remote-development",
+  "displayName": "AIX Remote Development",
+  "description": "Remote development for AIX machines",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aixRemote.connect",
+        "title": "Connect to AIX Machine",
+        "category": "AIX Remote"
+      },
+      {
+        "command": "aixRemote.disconnect",
+        "title": "Disconnect from AIX Machine",
+        "category": "AIX Remote"
+      },
+      {
+        "command": "aixRemote.openTerminal",
+        "title": "Open AIX Terminal",
+        "category": "AIX Remote"
+      },
+      {
+        "command": "aixRemoteExplorer.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "aixRemoteExplorer",
+          "name": "AIX Remote Files",
+          "when": "aixRemote.connected"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "aixRemote.connect",
+          "when": "view == aixRemoteExplorer && !aixRemote.connected",
+          "group": "navigation"
+        },
+        {
+          "command": "aixRemote.disconnect",
+          "when": "view == aixRemoteExplorer && aixRemote.connected",
+          "group": "navigation"
+        },
+        {
+          "command": "aixRemoteExplorer.refresh",
+          "when": "view == aixRemoteExplorer && aixRemote.connected",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.1",
+    "@types/node": "18.x",
+    "@types/ssh2": "^1.15.5",
+    "@types/vscode": "^1.74.0",
+    "@types/ws": "^8.18.1",
+    "@typescript-eslint/eslint-plugin": "^5.45.0",
+    "@typescript-eslint/parser": "^5.45.0",
+    "@vscode/test-cli": "^0.0.4",
+    "@vscode/test-electron": "^2.3.8",
+    "eslint": "^8.28.0",
+    "typescript": "^4.9.4"
+  },
+  "dependencies": {
+    "ssh2": "^1.14.0",
+    "ws": "^8.14.2"
+  }
+}

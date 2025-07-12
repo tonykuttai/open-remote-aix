@@ -1,0 +1,23 @@
+{
+  "name": "aix-remote-server",
+  "version": "0.1.0",
+  "description": "AIX Remote Development Server - MVP",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsc && node dist/server.js",
+    "watch": "tsc --watch"
+  },
+  "dependencies": {
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.5.9",
+    "typescript": "^5.0.0"
+  },
+  "keywords": ["aix", "remote", "development", "mvp"],
+  "author": "Tony Varghese",
+  "license": "MIT"
+}
