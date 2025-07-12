@@ -20,7 +20,7 @@ export class AIXRemoteExplorer implements vscode.TreeDataProvider<FileItem> {
             return [];
         }
 
-        const path = element ? element.resourceUri!.path : '/home';
+        const path = element ? element.resourceUri!.path : this.aixManager.getDefaultPath();
 
         try {
             const entries = await this.aixManager.readDirectory(path);

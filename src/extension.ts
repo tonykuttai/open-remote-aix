@@ -62,24 +62,14 @@ export function activate(context: vscode.ExtensionContext) {
 
 async function connectToAIX() {
     try {
-        // Get connection details from user
-        const host = await vscode.window.showInputBox({
-            prompt: 'Enter AIX hostname or IP address',
-            placeHolder: 'e.g., 192.168.1.100',
+        // Get connection string in username@hostname format
+        const connectionString = await vscode.window.showInputBox({
+            prompt: 'Enter connection (username@hostname or hostname)',
+            placeHolder: 'e.g., varghese@cpap8104.rtp.raleigh.ibm.com',
             ignoreFocusOut: true
         });
 
-        if (!host) {
-            return;
-        }
-
-        const username = await vscode.window.showInputBox({
-            prompt: 'Enter username',
-            placeHolder: 'e.g., your_username',
-            ignoreFocusOut: true
-        });
-
-        if (!username) {
+        if (!connectionString) {
             return;
         }
 
@@ -97,12 +87,14 @@ async function connectToAIX() {
         }, async (progress) => {
             progress.report({ increment: 0 });
 
-            // Connect via SSH and start server
-            progress.report({ increment: 50, message: "Establishing SSH connection..." });
-            await aixRemoteManager.connect(host, username, password || undefined);
+            progress.report({ increment: 20, message: "Establishing SSH connection..." });
+            await aixRemoteManager.connect(connectionString, password || undefined);
 
-            progress.report({ increment: 80, message: "Starting remote server..." });
-            await new Promise(resolve => setTimeout(resolve, 1000)); // Give server time to start
+            progress.report({ increment: 60, message: "Deploying server..." });
+            // Server deployment happens inside connect()
+            
+            progress.report({ increment: 80, message: "Starting services..." });
+            await new Promise(resolve => setTimeout(resolve, 1000));
 
             progress.report({ increment: 100, message: "Connected!" });
         });
@@ -113,7 +105,7 @@ async function connectToAIX() {
         // Refresh explorer
         remoteExplorer.refresh();
 
-        vscode.window.showInformationMessage(`Connected to AIX machine: ${host}`);
+        vscode.window.showInformationMessage(`Connected to AIX machine: ${aixRemoteManager.getHost()}`);
 
     } catch (error) {
         vscode.window.showErrorMessage(`Failed to connect: ${error instanceof Error ? error.message : String(error)}`);
