@@ -92,7 +92,7 @@ The extension automatically detects and uses node-pty installations:
 2. **Standard**: `node_modules/node-pty` (npm installation)
 3. **Fallback**: Basic terminal without PTY features
 
-## 🔌 Commands
+## Commands
 
 ### Available Commands
 - `AIX Remote: Connect to AIX Machine` - Establish connection
