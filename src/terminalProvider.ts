@@ -31,21 +31,8 @@ export class AIXTerminalProvider implements vscode.Pseudoterminal {
             this.dimensions = initialDimensions;
         }
 
-        // Send initial messages
-        this.writeEmitter.fire('\r\n\x1b[1;32m┌─ AIX Remote Terminal ─┐\x1b[0m\r\n');
-        this.writeEmitter.fire(`\x1b[1;32m│\x1b[0m Connected to: ${this.aixManager.getHost()}\r\n`);
-        
-        if (this.isFullTerminal) {
-            this.writeEmitter.fire(`\x1b[1;32m│\x1b[0m Terminal type: Full PTY (node-pty)\r\n`);
-        } else {
-            this.writeEmitter.fire(`\x1b[1;32m│\x1b[0m Terminal type: Basic (spawn fallback)\r\n`);
-        }
-        
-        this.writeEmitter.fire(`\x1b[1;32m└─────────────────────────┘\x1b[0m\r\n\r\n`);
-        
         try {
             // Create terminal session
-            this.writeEmitter.fire('Initializing terminal session...\r\n');
             this.terminalSession = await this.aixManager.createTerminalSession(
                 this.currentDirectory, 
                 this.dimensions.columns, 
@@ -59,11 +46,6 @@ export class AIXTerminalProvider implements vscode.Pseudoterminal {
 
             this.terminalSession.onExit((exitCode: number, signal?: number) => {
                 this.isReady = false;
-                if (signal) {
-                    this.writeEmitter.fire(`\r\n\x1b[33m[Terminal session ended with signal ${signal}]\x1b[0m\r\n`);
-                } else {
-                    this.writeEmitter.fire(`\r\n\x1b[33m[Terminal session ended with exit code ${exitCode}]\x1b[0m\r\n`);
-                }
                 this.closeEmitter.fire(exitCode);
             });
 
@@ -71,15 +53,14 @@ export class AIXTerminalProvider implements vscode.Pseudoterminal {
             const waitForReady = () => {
                 if (this.terminalSession && this.terminalSession.isReady()) {
                     this.isReady = true;
-                    this.writeEmitter.fire('\x1b[2J\x1b[H'); // Clear screen and reset cursor
                 } else {
-                    setTimeout(waitForReady, 100);
+                    setTimeout(waitForReady, 50);
                 }
             };
             waitForReady();
 
         } catch (error) {
-            this.writeEmitter.fire(`\x1b[31mFailed to create terminal session: ${error instanceof Error ? error.message : String(error)}\x1b[0m\r\n`);
+            this.writeEmitter.fire(`Failed to create terminal session: ${error instanceof Error ? error.message : String(error)}\r\n`);
             this.closeEmitter.fire(1);
         }
     }
@@ -124,6 +105,7 @@ export class AIXTerminalProvider implements vscode.Pseudoterminal {
 
 export class AIXTerminalManager {
     private terminals: Map<string, AIXTerminalProvider> = new Map();
+    private terminalGroups: Map<string, string[]> = new Map(); // Group ID -> Terminal IDs
     
     constructor(private aixManager: AIXRemoteManager) {}
 
@@ -148,11 +130,109 @@ export class AIXTerminalManager {
         const disposable = vscode.window.onDidCloseTerminal((closedTerminal) => {
             if (closedTerminal === terminal) {
                 this.terminals.delete(terminalId);
+                this.removeFromGroups(terminalId);
                 disposable.dispose();
             }
         });
 
         return terminal;
+    }
+
+    createSplitTerminal(direction: 'horizontal' | 'vertical' = 'horizontal', name?: string, initialDirectory?: string): vscode.Terminal {
+        if (!this.aixManager.isConnected()) {
+            throw new Error('Not connected to AIX machine');
+        }
+
+        // Get the active terminal to determine split behavior
+        const activeTerminal = vscode.window.activeTerminal;
+        const terminalName = name || `AIX Split (${this.aixManager.getHost().split('.')[0]})`;
+        
+        const provider = new AIXTerminalProvider(this.aixManager, terminalName, initialDirectory);
+        
+        // Create terminal with location based on split direction
+        // Note: VS Code's terminal splitting API is different - we'll create a regular terminal
+        // and let VS Code handle the splitting through commands
+        const terminal = vscode.window.createTerminal({
+            name: terminalName,
+            pty: provider
+        });
+
+        // Store reference
+        const terminalId = `${terminalName}-${Date.now()}`;
+        this.terminals.set(terminalId, provider);
+
+        // Group management for split terminals
+        if (activeTerminal) {
+            this.addToGroup(activeTerminal, terminal, terminalId);
+        }
+
+        // Clean up when terminal is disposed
+        const disposable = vscode.window.onDidCloseTerminal((closedTerminal) => {
+            if (closedTerminal === terminal) {
+                this.terminals.delete(terminalId);
+                this.removeFromGroups(terminalId);
+                disposable.dispose();
+            }
+        });
+
+        return terminal;
+    }
+
+    private addToGroup(parentTerminal: vscode.Terminal, newTerminal: vscode.Terminal, terminalId: string): void {
+        // Find existing group for parent terminal
+        let groupId: string | undefined;
+        for (const [gId, terminals] of this.terminalGroups.entries()) {
+            if (terminals.some(tId => {
+                const provider = this.terminals.get(tId);
+                return provider && this.getTerminalByProvider(provider) === parentTerminal;
+            })) {
+                groupId = gId;
+                break;
+            }
+        }
+
+        // Create new group if none exists
+        if (!groupId) {
+            groupId = `group-${Date.now()}`;
+            const parentId = this.getTerminalIdByTerminal(parentTerminal);
+            if (parentId) {
+                this.terminalGroups.set(groupId, [parentId]);
+            }
+        }
+
+        // Add new terminal to group
+        const group = this.terminalGroups.get(groupId);
+        if (group) {
+            group.push(terminalId);
+        }
+    }
+
+    private removeFromGroups(terminalId: string): void {
+        for (const [groupId, terminals] of this.terminalGroups.entries()) {
+            const index = terminals.indexOf(terminalId);
+            if (index !== -1) {
+                terminals.splice(index, 1);
+                if (terminals.length === 0) {
+                    this.terminalGroups.delete(groupId);
+                }
+                break;
+            }
+        }
+    }
+
+    private getTerminalIdByTerminal(terminal: vscode.Terminal): string | undefined {
+        for (const [id, provider] of this.terminals.entries()) {
+            if (this.getTerminalByProvider(provider) === terminal) {
+                return id;
+            }
+        }
+        return undefined;
+    }
+
+    private getTerminalByProvider(provider: AIXTerminalProvider): vscode.Terminal | undefined {
+        // This is a limitation - VS Code doesn't provide direct access to terminal from provider
+        // We'll need to track this differently
+        return undefined;
     }
 
     createInteractiveTerminal(name?: string, initialDirectory?: string, options?: {
@@ -180,16 +260,48 @@ export class AIXTerminalManager {
         return terminal;
     }
 
+    // Quick split methods for common operations
+    splitHorizontal(name?: string, initialDirectory?: string): vscode.Terminal {
+        const terminal = this.createSplitTerminal('horizontal', name, initialDirectory);
+        
+        // After creating terminal, trigger VS Code's split command
+        setTimeout(() => {
+            if (vscode.window.activeTerminal === terminal) {
+                vscode.commands.executeCommand('workbench.action.terminal.splitInActiveWorkspace');
+            }
+        }, 100);
+        
+        return terminal;
+    }
+
+    splitVertical(name?: string, initialDirectory?: string): vscode.Terminal {
+        const terminal = this.createSplitTerminal('vertical', name, initialDirectory);
+        
+        // After creating terminal, trigger VS Code's split command
+        setTimeout(() => {
+            if (vscode.window.activeTerminal === terminal) {
+                vscode.commands.executeCommand('workbench.action.terminal.split');
+            }
+        }, 100);
+        
+        return terminal;
+    }
+
     dispose(): void {
         // Close all terminals
         this.terminals.forEach(provider => {
             provider.close();
         });
         this.terminals.clear();
+        this.terminalGroups.clear();
     }
 
     getTerminalCount(): number {
         return this.terminals.size;
+    }
+
+    getGroupCount(): number {
+        return this.terminalGroups.size;
     }
 
     supportsFullTerminal(): boolean {
@@ -210,5 +322,6 @@ export class AIXTerminalManager {
         
         await Promise.all(closePromises);
         this.terminals.clear();
+        this.terminalGroups.clear();
     }
 }

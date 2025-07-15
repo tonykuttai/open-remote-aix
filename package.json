@@ -1,8 +1,8 @@
 {
   "name": "aix-remote-development",
   "displayName": "AIX Remote Development",
-  "description": "Remote development extension for AIX machines with integrated terminal support",
-  "version": "0.2.0",
+  "description": "Remote development extension for AIX machines with integrated terminal support and code command",
+  "version": "0.4.0",
   "engines": {
     "vscode": "^1.74.0"
   },
@@ -17,36 +17,91 @@
     "commands": [
       {
         "command": "aixRemote.connect",
-        "title": "Connect to AIX Machine",
+        "title": "Open Remote AIX: Connect to Machine",
         "icon": "$(plug)"
       },
       {
         "command": "aixRemote.disconnect",
-        "title": "Disconnect from AIX Machine",
+        "title": "Open Remote AIX: Disconnect from Machine",
         "icon": "$(debug-disconnect)"
       },
       {
         "command": "aixRemote.openTerminal",
-        "title": "Open AIX Terminal",
+        "title": "Open Remote AIX: Open Terminal",
         "icon": "$(terminal)"
       },
       {
         "command": "aixRemote.newTerminal",
-        "title": "New AIX Terminal",
+        "title": "Open Remote AIX: New Terminal",
         "icon": "$(add)"
       },
       {
+        "command": "aixRemote.splitTerminalHorizontal",
+        "title": "Open Remote AIX: Split Terminal Horizontal",
+        "icon": "$(split-horizontal)"
+      },
+      {
+        "command": "aixRemote.splitTerminalVertical",
+        "title": "Open Remote AIX: Split Terminal Vertical",
+        "icon": "$(split-vertical)"
+      },
+      {
+        "command": "aixRemote.splitTerminalRight",
+        "title": "Open Remote AIX: Split Terminal Right",
+        "icon": "$(split-vertical)"
+      },
+      {
+        "command": "aixRemote.splitTerminalDown",
+        "title": "Open Remote AIX: Split Terminal Down",
+        "icon": "$(split-horizontal)"
+      },
+      {
+        "command": "aixRemote.openFile",
+        "title": "Open Remote AIX: Open File",
+        "icon": "$(file)"
+      },
+      {
+        "command": "aixRemote.createFile",
+        "title": "Open Remote AIX: Create New File",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "aixRemote.debugServer",
+        "title": "Open Remote AIX: Debug Server Status",
+        "icon": "$(bug)"
+      },
+      {
+        "command": "aixRemote.forceRestartServer",
+        "title": "Open Remote AIX: Force Restart Server",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aixRemote.redeployServer",
+        "title": "Open Remote AIX: Redeploy Server",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "aixRemote.showServerLogs",
+        "title": "Open Remote AIX: Show Server Logs",
+        "icon": "$(output)"
+      },
+      {
+        "command": "aixRemote.toggleDebug",
+        "title": "Open Remote AIX: Toggle Debug Mode",
+        "icon": "$(debug-alt)"
+      },
+      {
         "command": "aixRemoteExplorer.refresh",
-        "title": "Refresh",
+        "title": "Open Remote AIX: Refresh Explorer",
         "icon": "$(refresh)"
       },
       {
         "command": "aixRemoteExplorer.openFile",
-        "title": "Open File"
+        "title": "Open Remote AIX: Open File from Explorer"
       },
       {
         "command": "aixRemoteExplorer.openTerminalHere",
-        "title": "Open Terminal Here",
+        "title": "Open Remote AIX: Open Terminal Here",
         "icon": "$(terminal)"
       }
     ],
@@ -71,6 +126,51 @@
           "command": "aixRemote.newTerminal",
           "when": "view == aixRemoteExplorer && aixRemote.connected",
           "group": "navigation@3"
+        },
+        {
+          "command": "aixRemote.openFile",
+          "when": "view == aixRemoteExplorer && aixRemote.connected",
+          "group": "file@1"
+        },
+        {
+          "command": "aixRemote.createFile",
+          "when": "view == aixRemoteExplorer && aixRemote.connected",
+          "group": "file@2"
+        },
+        {
+          "command": "aixRemote.splitTerminalHorizontal",
+          "when": "view == aixRemoteExplorer && aixRemote.connected",
+          "group": "terminal@1"
+        },
+        {
+          "command": "aixRemote.splitTerminalVertical",
+          "when": "view == aixRemoteExplorer && aixRemote.connected",
+          "group": "terminal@2"
+        },
+        {
+          "command": "aixRemote.debugServer",
+          "when": "view == aixRemoteExplorer && aixRemote.connected",
+          "group": "server@1"
+        },
+        {
+          "command": "aixRemote.forceRestartServer",
+          "when": "view == aixRemoteExplorer && aixRemote.connected",
+          "group": "server@2"
+        },
+        {
+          "command": "aixRemote.redeployServer",
+          "when": "view == aixRemoteExplorer && aixRemote.connected",
+          "group": "server@3"
+        },
+        {
+          "command": "aixRemote.showServerLogs",
+          "when": "view == aixRemoteExplorer && aixRemote.connected",
+          "group": "server@4"
+        },
+        {
+          "command": "aixRemote.toggleDebug",
+          "when": "view == aixRemoteExplorer && aixRemote.connected",
+          "group": "debug@1"
         },
         {
           "command": "aixRemoteExplorer.refresh",
@@ -108,6 +208,42 @@
           "when": "aixRemote.connected"
         },
         {
+          "command": "aixRemote.openFile",
+          "when": "aixRemote.connected"
+        },
+        {
+          "command": "aixRemote.createFile",
+          "when": "aixRemote.connected"
+        },
+        {
+          "command": "aixRemote.splitTerminalHorizontal",
+          "when": "aixRemote.connected"
+        },
+        {
+          "command": "aixRemote.splitTerminalVertical",
+          "when": "aixRemote.connected"
+        },
+        {
+          "command": "aixRemote.debugServer",
+          "when": "aixRemote.connected"
+        },
+        {
+          "command": "aixRemote.forceRestartServer",
+          "when": "aixRemote.connected"
+        },
+        {
+          "command": "aixRemote.redeployServer",
+          "when": "aixRemote.connected"
+        },
+        {
+          "command": "aixRemote.showServerLogs",
+          "when": "aixRemote.connected"
+        },
+        {
+          "command": "aixRemote.toggleDebug",
+          "when": "aixRemote.connected"
+        },
+        {
           "command": "aixRemoteExplorer.refresh",
           "when": "aixRemote.connected"
         }
@@ -125,8 +261,40 @@
     "viewsWelcome": [
       {
         "view": "aixRemoteExplorer",
-        "contents": "No AIX connection active.\n[Connect to AIX Machine](command:aixRemote.connect)",
+        "contents": "No AIX connection active.\n[Connect to AIX Machine](command:aixRemote.connect)\n\nOnce connected, you can:\n• Use 'code filename' in terminal to open files\n• Create and edit files remotely\n• Browse files in the explorer\n• Use server management tools for debugging",
         "when": "!aixRemote.connected"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "aixRemote.splitTerminalHorizontal",
+        "key": "ctrl+shift+5",
+        "when": "aixRemote.connected && terminalFocus"
+      },
+      {
+        "command": "aixRemote.splitTerminalVertical", 
+        "key": "ctrl+shift+'",
+        "when": "aixRemote.connected && terminalFocus"
+      },
+      {
+        "command": "aixRemote.newTerminal",
+        "key": "ctrl+shift+`",
+        "when": "aixRemote.connected"
+      },
+      {
+        "command": "aixRemote.openFile",
+        "key": "ctrl+alt+o",
+        "when": "aixRemote.connected"
+      },
+      {
+        "command": "aixRemote.createFile",
+        "key": "ctrl+alt+n",
+        "when": "aixRemote.connected"
+      },
+      {
+        "command": "aixRemote.toggleDebug",
+        "key": "ctrl+alt+d",
+        "when": "aixRemote.connected"
       }
     ]
   },

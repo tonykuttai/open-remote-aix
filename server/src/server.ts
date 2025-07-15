@@ -33,7 +33,7 @@ interface RPCMessage {
 interface RPCResponse {
     jsonrpc: '2.0';
     result?: any;
-    error?: { code: number; message: string; data?: any };
+    error?: { code: number | string; message: string; data?: any };
     id: string | number | null;
 }
 
@@ -41,6 +41,7 @@ interface TerminalSession {
     process: any; // IPty or ChildProcess
     type: 'pty' | 'spawn';
     cwd: string;
+    websocket: WebSocket; // Track which websocket owns this session
 }
 
 class AIXRemoteServer {
@@ -59,9 +60,11 @@ class AIXRemoteServer {
         console.log(`AIX Remote Server starting on port ${this.port}...`);
         console.log(`Platform: ${os.platform()}, Architecture: ${os.arch()}`);
         console.log(`PTY Support: ${pty ? 'Available' : 'Not Available'}`);
+        console.log(`Working Directory: ${process.cwd()}`);
+        console.log(`User: ${os.userInfo().username}`);
         
         this.wss.on('connection', (ws: WebSocket) => {
-            console.log('Client connected');
+            console.log('🔗 Client connected');
             
             // Store client connection
             const clientId = `client_${Date.now()}_${Math.random()}`;
@@ -70,6 +73,14 @@ class AIXRemoteServer {
             ws.on('message', async (data: WebSocket.Data) => {
                 try {
                     const message: RPCMessage = JSON.parse(data.toString());
+                    console.log(`📨 Received: ${message.method} (id: ${message.id})`);
+                    
+                    // Handle vscode.openFile and vscode.openWorkspace specially - forward to all clients
+                    if (message.method === 'vscode.openFile' || message.method === 'vscode.openWorkspace') {
+                        this.handleVSCodeRequest(message, ws);
+                        return;
+                    }
+                    
                     const response = await this.handleMessage(message, ws);
                     
                     // Only send response if there is one (streaming commands return null)
@@ -77,6 +88,7 @@ class AIXRemoteServer {
                         ws.send(JSON.stringify(response));
                     }
                 } catch (error) {
+                    console.error('❌ Error handling message:', error);
                     const errorResponse: RPCResponse = {
                         jsonrpc: '2.0',
                         error: {
@@ -91,14 +103,14 @@ class AIXRemoteServer {
             });
 
             ws.on('close', () => {
-                console.log('Client disconnected');
+                console.log('🔌 Client disconnected');
                 // Clean up any active sessions for this connection
                 this.cleanupSessionsForConnection(ws);
                 this.clientConnections.delete(ws);
             });
 
             ws.on('error', (error) => {
-                console.error('WebSocket error:', error);
+                console.error('❌ WebSocket error:', error);
                 this.cleanupSessionsForConnection(ws);
                 this.clientConnections.delete(ws);
             });
@@ -112,14 +124,16 @@ class AIXRemoteServer {
                     arch: os.arch(),
                     hostname: os.hostname(),
                     ptySupported: !!pty,
-                    shell: process.env.SHELL || '/bin/sh'
+                    shell: process.env.SHELL || '/bin/sh',
+                    cwd: process.cwd(),
+                    user: os.userInfo().username
                 },
                 id: 'welcome'
             };
             ws.send(JSON.stringify(welcome));
         });
 
-        console.log(`AIX Remote Server listening on port ${this.port}`);
+        console.log(`🚀 AIX Remote Server listening on port ${this.port}`);
     }
 
     async handleMessage(message: RPCMessage, ws: WebSocket): Promise<RPCResponse | null> {
@@ -174,20 +188,84 @@ class AIXRemoteServer {
                 id: id || null
             };
         } catch (error) {
+            console.error(`❌ Error in ${method}:`, error);
+            
+            // Map specific error types to appropriate error codes
+            let errorCode: string | number = -32603; // Internal error
+            let errorMessage = 'Internal error';
+            
+            if (error instanceof Error) {
+                errorMessage = error.message;
+                
+                // Map filesystem errors to specific codes
+                if (error.message.includes('ENOENT') || error.message.includes('no such file')) {
+                    errorCode = 'ENOENT';
+                    errorMessage = `File not found: ${params?.path || 'unknown path'}`;
+                } else if (error.message.includes('EACCES')) {
+                    errorCode = 'EACCES';
+                    errorMessage = `Permission denied: ${params?.path || 'unknown path'}`;
+                } else if (error.message.includes('EISDIR')) {
+                    errorCode = 'EISDIR';
+                    errorMessage = `Is a directory: ${params?.path || 'unknown path'}`;
+                }
+            }
+            
             return {
                 jsonrpc: '2.0',
                 error: {
-                    code: -32603,
-                    message: 'Internal error',
-                    data: error instanceof Error ? error.message : String(error)
+                    code: errorCode,
+                    message: errorMessage,
+                    data: error instanceof Error ? error.stack : String(error)
                 },
                 id: id || null
             };
         }
     }
 
+    // Combined handler for both vscode.openFile and vscode.openWorkspace
+    private handleVSCodeRequest(message: RPCMessage, requestingWs: WebSocket): void {
+        const { filePath, isDirectory } = message.params || {};
+        console.log(`📂 Opening ${isDirectory ? 'workspace' : 'file'} in VS Code: ${filePath}`);
+        
+        // Find VS Code client connection
+        for (const [ws, clientId] of this.clientConnections.entries()) {
+            if (ws !== requestingWs && ws.readyState === WebSocket.OPEN) {
+                // Forward the request to VS Code
+                ws.send(JSON.stringify(message));
+                console.log(`✅ Forwarded ${isDirectory ? 'workspace' : 'file'} open request to VS Code client`);
+                
+                // Send success response back to terminal
+                const response: RPCResponse = {
+                    jsonrpc: '2.0',
+                    result: { 
+                        success: true, 
+                        forwarded: true,
+                        filePath: filePath,
+                        isDirectory: isDirectory || false
+                    },
+                    id: message.id || null
+                };
+                requestingWs.send(JSON.stringify(response));
+                return;
+            }
+        }
+        
+        // No VS Code client found - still send success but indicate not forwarded
+        console.log(`⚠️ VS Code client not found, but sending success response`);
+        const errorResponse: RPCResponse = {
+            jsonrpc: '2.0',
+            result: { 
+                success: true,
+                forwarded: false,
+                message: 'VS Code not connected, but request processed'
+            },
+            id: message.id || null
+        };
+        requestingWs.send(JSON.stringify(errorResponse));
+    }
+
     private createTerminalSession(cwd: string = os.homedir(), cols: number = 80, rows: number = 30, sessionId: string | number, ws: WebSocket): void {
-        console.log(`Creating terminal session: ${sessionId} (${cols}x${rows})`);
+        console.log(`🖥️ Creating terminal session ${sessionId} in ${cwd}`);
         
         if (pty) {
             // Use node-pty for full terminal support
@@ -204,7 +282,8 @@ class AIXRemoteServer {
                 const session: TerminalSession = {
                     process: ptyProcess,
                     type: 'pty',
-                    cwd: cwd
+                    cwd: cwd,
+                    websocket: ws
                 };
 
                 this.activeSessions.set(sessionId, session);
@@ -226,7 +305,7 @@ class AIXRemoteServer {
 
                 // Handle PTY exit
                 ptyProcess.onExit(({ exitCode, signal }: { exitCode: number; signal?: number }) => {
-                    console.log(`PTY session ${sessionId} exited with code: ${exitCode}, signal: ${signal}`);
+                    console.log(`🏁 Terminal session ${sessionId} exited with code ${exitCode}`);
                     const response: RPCResponse = {
                         jsonrpc: '2.0',
                         result: {
@@ -253,9 +332,10 @@ class AIXRemoteServer {
                     id: sessionId
                 };
                 ws.send(JSON.stringify(readyResponse));
+                console.log(`✅ PTY terminal session ${sessionId} ready (PID: ${ptyProcess.pid})`);
 
             } catch (error) {
-                console.error(`Failed to create PTY session: ${error}`);
+                console.log(`❌ PTY failed, falling back to spawn:`, error);
                 this.fallbackToSpawn(cwd, sessionId, ws);
             }
         } else {
@@ -265,7 +345,7 @@ class AIXRemoteServer {
     }
 
     private fallbackToSpawn(cwd: string, sessionId: string | number, ws: WebSocket): void {
-        console.log(`Using spawn fallback for session: ${sessionId}`);
+        console.log(`🔄 Using spawn fallback for terminal session ${sessionId}`);
         
         const shell = process.env.SHELL || '/bin/bash';
         const child = spawn(shell, ['-i'], {  // Interactive shell
@@ -277,7 +357,8 @@ class AIXRemoteServer {
         const session: TerminalSession = {
             process: child,
             type: 'spawn',
-            cwd: cwd
+            cwd: cwd,
+            websocket: ws
         };
 
         this.activeSessions.set(sessionId, session);
@@ -314,7 +395,7 @@ class AIXRemoteServer {
 
         // Handle process exit
         child.on('close', (code: number | null) => {
-            console.log(`Spawn session ${sessionId} exited with code: ${code}`);
+            console.log(`🏁 Spawn terminal session ${sessionId} exited with code ${code}`);
             const response: RPCResponse = {
                 jsonrpc: '2.0',
                 result: {
@@ -330,7 +411,7 @@ class AIXRemoteServer {
         });
 
         child.on('error', (error: Error) => {
-            console.error(`Spawn session error: ${error}`);
+            console.error(`❌ Spawn terminal session ${sessionId} error:`, error);
             const response: RPCResponse = {
                 jsonrpc: '2.0',
                 error: {
@@ -357,6 +438,7 @@ class AIXRemoteServer {
             id: sessionId
         };
         ws.send(JSON.stringify(readyResponse));
+        console.log(`✅ Spawn terminal session ${sessionId} ready (PID: ${child.pid})`);
     }
 
     private handleTerminalInput(sessionId: string | number, data: string): void {
@@ -373,8 +455,10 @@ class AIXRemoteServer {
                     }
                 }
             } catch (error) {
-                console.error(`Failed to write to terminal session ${sessionId}:`, error);
+                console.error(`❌ Failed to write to terminal session ${sessionId}:`, error);
             }
+        } else {
+            console.warn(`⚠️ Terminal session ${sessionId} not found for input`);
         }
     }
 
@@ -383,9 +467,9 @@ class AIXRemoteServer {
         if (session && session.type === 'pty') {
             try {
                 session.process.resize(cols, rows);
-                console.log(`Resized terminal ${sessionId} to ${cols}x${rows}`);
+                console.log(`📐 Resized terminal ${sessionId} to ${cols}x${rows}`);
             } catch (error) {
-                console.error(`Failed to resize terminal ${sessionId}:`, error);
+                // Ignore resize errors silently
             }
         }
     }
@@ -394,7 +478,7 @@ class AIXRemoteServer {
         const session = this.activeSessions.get(sessionId);
         if (session) {
             try {
-                console.log(`Killing terminal session ${sessionId} with signal ${signal}`);
+                console.log(`🔪 Killing terminal session ${sessionId} with ${signal}`);
                 if (session.type === 'pty') {
                     session.process.kill(signal);
                 } else {
@@ -402,33 +486,48 @@ class AIXRemoteServer {
                 }
                 this.activeSessions.delete(sessionId);
             } catch (error) {
-                console.error(`Failed to kill terminal session ${sessionId}:`, error);
+                console.error(`❌ Failed to kill terminal session ${sessionId}:`, error);
             }
         }
     }
 
     private cleanupSessionsForConnection(ws: WebSocket): void {
-        console.log('Cleaning up terminal sessions for disconnected client');
+        console.log('🧹 Cleaning up terminal sessions for disconnected client');
+        const sessionsToClean: (string | number)[] = [];
+        
+        // Find sessions belonging to this websocket
         for (const [sessionId, session] of this.activeSessions.entries()) {
-            try {
-                if (session.type === 'pty') {
-                    session.process.kill('SIGTERM');
-                } else {
-                    session.process.kill('SIGTERM');
-                }
-                console.log(`Killed terminal session ${sessionId}`);
-            } catch (error) {
-                console.log(`Failed to kill terminal session ${sessionId}:`, error);
+            if (session.websocket === ws) {
+                sessionsToClean.push(sessionId);
             }
         }
-        this.activeSessions.clear();
+        
+        // Clean up the sessions
+        for (const sessionId of sessionsToClean) {
+            const session = this.activeSessions.get(sessionId);
+            if (session) {
+                try {
+                    if (session.type === 'pty') {
+                        session.process.kill('SIGTERM');
+                    } else {
+                        session.process.kill('SIGTERM');
+                    }
+                    console.log(`🗑️ Killed terminal session ${sessionId}`);
+                } catch (error) {
+                    console.log(`❌ Failed to kill terminal session ${sessionId}:`, error);
+                }
+                this.activeSessions.delete(sessionId);
+            }
+        }
     }
 
-    // File system methods (unchanged)
+    // File system methods
     async readDirectory(dirPath: string): Promise<any[]> {
+        console.log(`📁 Reading directory: ${dirPath}`);
         return new Promise((resolve, reject) => {
             fs.readdir(dirPath, { withFileTypes: true }, (err, entries) => {
                 if (err) {
+                    console.error(`❌ Failed to read directory ${dirPath}:`, err);
                     reject(err);
                     return;
                 }
@@ -438,31 +537,48 @@ class AIXRemoteServer {
                           entry.isSymbolicLink() ? 'symlink' : 'file',
                     path: path.join(dirPath, entry.name)
                 }));
+                console.log(`✅ Found ${result.length} entries in ${dirPath}`);
                 resolve(result);
             });
         });
     }
 
     async readFile(filePath: string): Promise<string> {
+        console.log(`📖 Reading file: ${filePath}`);
         return new Promise((resolve, reject) => {
             fs.readFile(filePath, 'utf8', (err, data) => {
                 if (err) {
+                    console.error(`❌ Failed to read file ${filePath}:`, err);
                     reject(err);
                     return;
                 }
+                console.log(`✅ Read file ${filePath} (${data.length} characters)`);
                 resolve(data);
             });
         });
     }
 
     async writeFile(filePath: string, content: string): Promise<boolean> {
+        console.log(`✏️ Writing file: ${filePath} (${content.length} characters)`);
         return new Promise((resolve, reject) => {
-            fs.writeFile(filePath, content, 'utf8', (err) => {
-                if (err) {
-                    reject(err);
+            // Ensure directory exists
+            const dir = path.dirname(filePath);
+            fs.mkdir(dir, { recursive: true }, (mkdirErr) => {
+                if (mkdirErr && mkdirErr.code !== 'EEXIST') {
+                    console.error(`❌ Failed to create directory ${dir}:`, mkdirErr);
+                    reject(mkdirErr);
                     return;
                 }
-                resolve(true);
+                
+                fs.writeFile(filePath, content, 'utf8', (err) => {
+                    if (err) {
+                        console.error(`❌ Failed to write file ${filePath}:`, err);
+                        reject(err);
+                        return;
+                    }
+                    console.log(`✅ Wrote file ${filePath}`);
+                    resolve(true);
+                });
             });
         });
     }
@@ -471,10 +587,14 @@ class AIXRemoteServer {
         return new Promise((resolve, reject) => {
             fs.stat(filePath, (err, stats) => {
                 if (err) {
+                    // Don't log ENOENT errors as they're common when checking if files exist
+                    if (err.code !== 'ENOENT') {
+                        console.error(`❌ Failed to stat ${filePath}:`, err);
+                    }
                     reject(err);
                     return;
                 }
-                resolve({
+                const result = {
                     size: stats.size,
                     isFile: stats.isFile(),
                     isDirectory: stats.isDirectory(),
@@ -482,13 +602,15 @@ class AIXRemoteServer {
                     modified: stats.mtime,
                     created: stats.birthtime,
                     mode: stats.mode
-                });
+                };
+                resolve(result);
             });
         });
     }
 
     // Simple command execution (for non-terminal commands)
     async executeCommand(command: string, cwd = process.cwd()): Promise<any> {
+        console.log(`⚡ Executing command: ${command} in ${cwd}`);
         return new Promise((resolve, reject) => {
             const child = spawn('sh', ['-c', command], {
                 cwd,
@@ -507,6 +629,7 @@ class AIXRemoteServer {
             });
 
             child.on('close', (code) => {
+                console.log(`✅ Command completed with exit code ${code}`);
                 resolve({
                     exitCode: code,
                     stdout: stdout.trim(),
@@ -517,13 +640,14 @@ class AIXRemoteServer {
             });
 
             child.on('error', (error) => {
+                console.error(`❌ Command failed:`, error);
                 reject(error);
             });
         });
     }
 
     getSystemInfo(): any {
-        return {
+        const info = {
             platform: os.platform(),
             arch: os.arch(),
             hostname: os.hostname(),
@@ -536,6 +660,8 @@ class AIXRemoteServer {
             cwd: process.cwd(),
             ptySupported: !!pty,
             shell: process.env.SHELL || '/bin/sh',
+            activeSessions: this.activeSessions.size,
+            connectedClients: this.clientConnections.size,
             env: {
                 USER: process.env.USER,
                 HOME: process.env.HOME,
@@ -543,6 +669,8 @@ class AIXRemoteServer {
                 PATH: process.env.PATH
             }
         };
+        console.log(`ℹ️ System info requested`);
+        return info;
     }
 }
 
@@ -551,13 +679,24 @@ const server = new AIXRemoteServer(8080);
 
 // Handle graceful shutdown
 process.on('SIGINT', () => {
-    console.log('\nShutting down AIX Remote Server...');
+    console.log('\n🛑 Shutting down AIX Remote Server...');
     process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-    console.log('\nShutting down AIX Remote Server...');
+    console.log('\n🛑 Shutting down AIX Remote Server...');
     process.exit(0);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+    console.error('💥 Uncaught Exception:', error);
+    process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
+    // Don't exit on unhandled rejections, just log them
 });
 
 export { AIXRemoteServer };

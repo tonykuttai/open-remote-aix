@@ -1,7 +1,7 @@
 {
   "name": "aix-remote-server",
-  "version": "0.1.0",
-  "description": "AIX Remote Development Server with full terminal support",
+  "version": "0.3.0",
+  "description": "AIX Remote Development Server with full terminal support and code command integration",
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
@@ -18,7 +18,7 @@
     "@types/ws": "^8.5.9",
     "typescript": "^5.0.0"
   },
-  "keywords": ["aix", "remote", "development", "terminal"],
+  "keywords": ["aix", "remote", "development", "terminal", "code-command"],
   "author": "Tony Varghese",
   "license": "MIT"
 }
