@@ -1,13 +1,14 @@
 {
   "name": "aix-remote-server",
   "version": "0.1.0",
-  "description": "AIX Remote Development Server - MVP",
+  "description": "AIX Remote Development Server with full terminal support",
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "tsc && node dist/server.js",
-    "watch": "tsc --watch"
+    "watch": "tsc --watch",
+    "setup-pty": "node setup-nodepty.js"
   },
   "dependencies": {
     "ws": "^8.14.2"
@@ -17,7 +18,7 @@
     "@types/ws": "^8.5.9",
     "typescript": "^5.0.0"
   },
-  "keywords": ["aix", "remote", "development", "mvp"],
+  "keywords": ["aix", "remote", "development", "terminal"],
   "author": "Tony Varghese",
   "license": "MIT"
 }

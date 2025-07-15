@@ -27,6 +27,7 @@ export class AIXFileSystemProvider implements vscode.FileSystemProvider {
                 size: stats.size
             };
         } catch (error) {
+            console.error(`Failed to stat ${uri.path}:`, error);
             throw vscode.FileSystemError.FileNotFound(uri);
         }
     }
@@ -43,6 +44,7 @@ export class AIXFileSystemProvider implements vscode.FileSystemProvider {
                 vscode.FileType.SymbolicLink
             ]);
         } catch (error) {
+            console.error(`Failed to read directory ${uri.path}:`, error);
             throw vscode.FileSystemError.FileNotFound(uri);
         }
     }
@@ -58,6 +60,7 @@ export class AIXFileSystemProvider implements vscode.FileSystemProvider {
             const content = await this.aixManager.readFile(path);
             return Buffer.from(content, 'utf8');
         } catch (error) {
+            console.error(`Failed to read file ${uri.path}:`, error);
             throw vscode.FileSystemError.FileNotFound(uri);
         }
     }
@@ -71,6 +74,7 @@ export class AIXFileSystemProvider implements vscode.FileSystemProvider {
             // Notify that file has changed
             this._emitter.fire([{ type: vscode.FileChangeType.Changed, uri }]);
         } catch (error) {
+            console.error(`Failed to write file ${uri.path}:`, error);
             throw vscode.FileSystemError.NoPermissions(uri);
         }
     }

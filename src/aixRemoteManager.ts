@@ -1,5 +1,5 @@
 import { Client as SSHClient } from 'ssh2';
-import * as WebSocket from 'ws';
+import WebSocket from 'ws';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -28,6 +28,29 @@ interface SSHConfig {
     [key: string]: any;
 }
 
+interface PendingRequest {
+    resolve: Function;
+    reject: Function;
+    streamHandler?: (response: RPCResponse) => void;
+}
+
+export interface TerminalSession {
+    onData: (callback: (data: string) => void) => void;
+    onExit: (callback: (exitCode: number, signal?: number) => void) => void;
+    write: (data: string) => void;
+    resize: (cols: number, rows: number) => void;
+    kill: (signal?: string) => void;
+    isReady: () => boolean;
+}
+
+export interface StreamingCommandResult {
+    onData: (callback: (data: string) => void) => void;
+    onError: (callback: (data: string) => void) => void;
+    onExit: (callback: (code: number) => void) => void;
+    write: (data: string) => void;
+    kill: (signal?: string) => void;
+}
+
 export class AIXRemoteManager {
     private sshClient: SSHClient | null = null;
     private wsClient: WebSocket | null = null;
@@ -35,8 +58,9 @@ export class AIXRemoteManager {
     private host: string = '';
     private username: string = '';
     private requestId: number = 0;
-    private pendingRequests: Map<string | number, { resolve: Function; reject: Function }> = new Map();
+    private pendingRequests: Map<string | number, PendingRequest> = new Map();
     private sshConfigs: Map<string, SSHConfig> = new Map();
+    private serverSupportsPTY: boolean = false;
 
     constructor() {
         this.loadSSHConfig();
@@ -317,19 +341,23 @@ export class AIXRemoteManager {
             // Kill any existing server processes
             console.log('Stopping any existing server processes...');
             await this.execCommand('export PATH="/opt/nodejs/bin:$PATH" && pkill -f "node.*server.js" 2>/dev/null || true');
-            
+
             // Wait a moment for processes to die
             await new Promise(resolve => setTimeout(resolve, 2000));
-            
+
+            // Setup node-pty if available
+            console.log('Setting up node-pty...');
+            await this.execCommand('cd ~/.aix-remote && export PATH="/opt/nodejs/bin:$PATH" && node setup-nodepty.js || echo "node-pty setup skipped"');
+
             // Start server
             console.log('Starting AIX remote server...');
             const startCmd = 'cd ~/.aix-remote && export PATH="/opt/nodejs/bin:$PATH" && nohup node dist/server.js > server.log 2>&1 < /dev/null & echo "Server started with PID: $!"';
             const result = await this.execCommand(startCmd);
             console.log('Server start result:', result);
-            
+
             // Give server time to start
             await new Promise(resolve => setTimeout(resolve, 3000));
-            
+
         } catch (error) {
             console.error('❌ Server start failed:', error);
             throw error;
@@ -530,6 +558,11 @@ export class AIXRemoteManager {
     private handleResponse(response: RPCResponse) {
         if (response.id === 'welcome') {
             console.log('Received welcome message:', response.result);
+            // Check if server supports PTY
+            if (response.result && response.result.ptySupported !== undefined) {
+                this.serverSupportsPTY = response.result.ptySupported;
+                console.log(`Server PTY support: ${this.serverSupportsPTY ? 'Yes' : 'No'}`);
+            }
             return;
         }
 
@@ -539,12 +572,22 @@ export class AIXRemoteManager {
 
         const pending = this.pendingRequests.get(response.id);
         if (pending) {
-            this.pendingRequests.delete(response.id);
-            
-            if (response.error) {
-                pending.reject(new Error(response.error.message));
+            // Check if this is a streaming response
+            if (pending.streamHandler) {
+                pending.streamHandler(response);
+                // Only delete when we get an 'exit' type response
+                if (response.result && (response.result.type === 'exit' || response.error)) {
+                    this.pendingRequests.delete(response.id);
+                }
             } else {
-                pending.resolve(response.result);
+                // Regular one-time response
+                this.pendingRequests.delete(response.id);
+                
+                if (response.error) {
+                    pending.reject(new Error(response.error.message));
+                } else {
+                    pending.resolve(response.result);
+                }
             }
         }
     }
@@ -574,6 +617,141 @@ export class AIXRemoteManager {
                 }
             }, 30000);
         });
+    }
+
+    /**
+     * Create a new terminal session with PTY support
+     */
+    async createTerminalSession(cwd?: string, cols: number = 80, rows: number = 24): Promise<TerminalSession> {
+        if (!this.wsClient || !this.connected) {
+            throw new Error('Not connected to AIX machine');
+        }
+
+        const id = ++this.requestId;
+        const message: RPCMessage = {
+            jsonrpc: '2.0',
+            method: 'terminal.create',
+            params: { cwd: cwd || this.getDefaultPath(), cols, rows },
+            id
+        };
+
+        const callbacks = {
+            onData: [] as ((data: string) => void)[],
+            onExit: [] as ((exitCode: number, signal?: number) => void)[]
+        };
+
+        let ready = false;
+
+        // Set up streaming response handler
+        const streamHandler = (response: RPCResponse) => {
+            if (response.result) {
+                const { type, data, exitCode, signal } = response.result;
+                switch (type) {
+                    case 'ready':
+                        ready = true;
+                        console.log(`Terminal session ${id} ready, PID: ${data || 'unknown'}`);
+                        break;
+                    case 'data':
+                        callbacks.onData.forEach(cb => cb(data));
+                        break;
+                    case 'exit':
+                        callbacks.onExit.forEach(cb => cb(exitCode, signal));
+                        break;
+                }
+            }
+        };
+
+        // Store stream handler
+        this.pendingRequests.set(id, { 
+            resolve: () => {}, 
+            reject: () => {},
+            streamHandler 
+        });
+
+        // Send terminal creation request
+        this.wsClient.send(JSON.stringify(message));
+
+        return {
+            onData: (callback: (data: string) => void) => {
+                callbacks.onData.push(callback);
+            },
+            onExit: (callback: (exitCode: number, signal?: number) => void) => {
+                callbacks.onExit.push(callback);
+            },
+            write: (data: string) => {
+                const inputMessage: RPCMessage = {
+                    jsonrpc: '2.0',
+                    method: 'terminal.input',
+                    params: { sessionId: id, data },
+                    id: `${id}_input`
+                };
+                this.wsClient!.send(JSON.stringify(inputMessage));
+            },
+            resize: (cols: number, rows: number) => {
+                const resizeMessage: RPCMessage = {
+                    jsonrpc: '2.0',
+                    method: 'terminal.resize',
+                    params: { sessionId: id, cols, rows },
+                    id: `${id}_resize`
+                };
+                this.wsClient!.send(JSON.stringify(resizeMessage));
+            },
+            kill: (signal: string = 'SIGTERM') => {
+                const killMessage: RPCMessage = {
+                    jsonrpc: '2.0',
+                    method: 'terminal.kill',
+                    params: { sessionId: id, signal },
+                    id: `${id}_kill`
+                };
+                this.wsClient!.send(JSON.stringify(killMessage));
+            },
+            isReady: () => ready
+        };
+    }
+
+    /**
+     * Execute a command with streaming output for terminal use (legacy support)
+     */
+    async executeCommandStreaming(command: string, cwd?: string): Promise<StreamingCommandResult> {
+        // For backward compatibility, we'll create a terminal session and run the command
+        const terminal = await this.createTerminalSession(cwd);
+        
+        const callbacks = {
+            onData: [] as ((data: string) => void)[],
+            onError: [] as ((data: string) => void)[],
+            onExit: [] as ((code: number) => void)[]
+        };
+
+        terminal.onData((data) => {
+            callbacks.onData.forEach(cb => cb(data));
+        });
+
+        terminal.onExit((exitCode) => {
+            callbacks.onExit.forEach(cb => cb(exitCode));
+        });
+
+        // Execute the command
+        setTimeout(() => {
+            terminal.write(command + '\n');
+        }, 100);
+
+        return {
+            onData: (callback: (data: string) => void) => {
+                callbacks.onData.push(callback);
+            },
+            onError: (callback: (data: string) => void) => {
+                callbacks.onError.push(callback);
+            },
+            onExit: (callback: (code: number) => void) => {
+                callbacks.onExit.push(callback);
+            },
+            write: (data: string) => {
+                terminal.write(data);
+            },
+            kill: (signal: string = 'SIGTERM') => {
+                terminal.kill(signal);
+            }
+        };
     }
 
     // Public API methods
@@ -631,5 +809,9 @@ export class AIXRemoteManager {
 
     getDefaultPath(): string {
         return `/home/${this.username}`;
+    }
+
+    supportsFullTerminal(): boolean {
+        return this.serverSupportsPTY;
     }
 }

@@ -1,87 +1,145 @@
 {
   "name": "aix-remote-development",
   "displayName": "AIX Remote Development",
-  "description": "Remote development for AIX machines",
-  "version": "0.1.0",
+  "description": "Remote development extension for AIX machines with integrated terminal support",
+  "version": "0.2.0",
   "engines": {
     "vscode": "^1.74.0"
   },
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:aixRemote.connect"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "aixRemote.connect",
         "title": "Connect to AIX Machine",
-        "category": "AIX Remote"
+        "icon": "$(plug)"
       },
       {
         "command": "aixRemote.disconnect",
         "title": "Disconnect from AIX Machine",
-        "category": "AIX Remote"
+        "icon": "$(debug-disconnect)"
       },
       {
         "command": "aixRemote.openTerminal",
         "title": "Open AIX Terminal",
-        "category": "AIX Remote"
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "aixRemote.newTerminal",
+        "title": "New AIX Terminal",
+        "icon": "$(add)"
       },
       {
         "command": "aixRemoteExplorer.refresh",
         "title": "Refresh",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "aixRemoteExplorer.openFile",
+        "title": "Open File"
+      },
+      {
+        "command": "aixRemoteExplorer.openTerminalHere",
+        "title": "Open Terminal Here",
+        "icon": "$(terminal)"
       }
     ],
-    "views": {
-      "explorer": [
-        {
-          "id": "aixRemoteExplorer",
-          "name": "AIX Remote Files",
-          "when": "aixRemote.connected"
-        }
-      ]
-    },
     "menus": {
       "view/title": [
         {
           "command": "aixRemote.connect",
           "when": "view == aixRemoteExplorer && !aixRemote.connected",
-          "group": "navigation"
+          "group": "navigation@1"
         },
         {
           "command": "aixRemote.disconnect",
           "when": "view == aixRemoteExplorer && aixRemote.connected",
-          "group": "navigation"
+          "group": "navigation@1"
+        },
+        {
+          "command": "aixRemote.openTerminal",
+          "when": "view == aixRemoteExplorer && aixRemote.connected",
+          "group": "navigation@2"
+        },
+        {
+          "command": "aixRemote.newTerminal",
+          "when": "view == aixRemoteExplorer && aixRemote.connected",
+          "group": "navigation@3"
         },
         {
           "command": "aixRemoteExplorer.refresh",
           "when": "view == aixRemoteExplorer && aixRemote.connected",
-          "group": "navigation"
+          "group": "navigation@4"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "aixRemoteExplorer.openTerminalHere",
+          "when": "view == aixRemoteExplorer && viewItem == directory",
+          "group": "terminal@1"
+        },
+        {
+          "command": "aixRemoteExplorer.openTerminalHere",
+          "when": "view == aixRemoteExplorer && viewItem == file",
+          "group": "terminal@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "aixRemote.connect",
+          "when": "!aixRemote.connected"
+        },
+        {
+          "command": "aixRemote.disconnect",
+          "when": "aixRemote.connected"
+        },
+        {
+          "command": "aixRemote.openTerminal",
+          "when": "aixRemote.connected"
+        },
+        {
+          "command": "aixRemote.newTerminal",
+          "when": "aixRemote.connected"
+        },
+        {
+          "command": "aixRemoteExplorer.refresh",
+          "when": "aixRemote.connected"
         }
       ]
-    }
+    },
+    "views": {
+      "explorer": [
+        {
+          "id": "aixRemoteExplorer",
+          "name": "AIX Remote",
+          "when": "true"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "aixRemoteExplorer",
+        "contents": "No AIX connection active.\n[Connect to AIX Machine](command:aixRemote.connect)",
+        "when": "!aixRemote.connected"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "pretest": "npm run compile && npm run lint",
-    "lint": "eslint src --ext ts",
-    "test": "vscode-test"
+    "watch": "tsc -watch -p ./"
   },
   "devDependencies": {
-    "@types/mocha": "^10.0.1",
-    "@types/node": "18.x",
-    "@types/ssh2": "^1.15.5",
     "@types/vscode": "^1.74.0",
-    "@types/ws": "^8.18.1",
-    "@typescript-eslint/eslint-plugin": "^5.45.0",
-    "@typescript-eslint/parser": "^5.45.0",
-    "@vscode/test-cli": "^0.0.4",
-    "@vscode/test-electron": "^2.3.8",
-    "eslint": "^8.28.0",
+    "@types/node": "16.x",
+    "@types/ssh2": "^1.11.0",
+    "@types/ws": "^8.5.9",
     "typescript": "^4.9.4"
   },
   "dependencies": {
