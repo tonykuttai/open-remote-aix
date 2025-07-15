@@ -1,56 +1,36 @@
 # AIX Remote Development Extension
 
-A VS Code extension that enables seamless remote development on AIX machines with **full terminal integration**, automatic server deployment, and WebSocket-based file operations.
+A VS Code extension for remote development on AIX machines. Provides terminal access, file browsing, and automatic server deployment over SSH.
 
-## ✨ Features
+## Features
 
-### 🔗 **Automatic Connection & Deployment**
-- **One-click connection** to remote AIX machines via SSH
-- **Automatic server deployment** using SCP for efficient file transfers
-- **Smart server management** - reuses existing server if already running
-- **SSH key authentication** support with automatic SSH config parsing
+**Terminal Integration**
+- Full terminal access to AIX machines directly in VS Code
+- Support for interactive programs like vi, top, and htop
+- Multiple terminal sessions
+- Right-click folders to open terminal in specific directory
 
-### 💻 **Full Terminal Integration**
-- **Native AIX terminal** directly in VS Code with full PTY support
-- **Interactive programs** - vi, nano, top, htop work perfectly
-- **Multiple terminal sessions** - create named terminals for different tasks
-- **Context-aware terminals** - right-click folders to open terminal in specific directory
-- **Terminal resizing** and proper ANSI color support
-- **Command history** and tab completion
+**File Operations**
+- Browse remote directories in VS Code's Explorer panel
+- Edit files directly on the remote machine
+- Real-time file operations over WebSocket
 
-### 📁 **Remote File Operations**
-- **Browse remote directories** in VS Code's Explorer panel
-- **Read and edit files** directly on the remote machine
-- **Real-time file operations** via WebSocket communication
-- **Enhanced file icons** based on file types
-- **Sorted directory listings** (directories first, then alphabetical)
+**Automatic Setup**
+- One-click connection to AIX machines
+- Automatic server deployment using SSH and SCP
+- Handles Node.js path configuration automatically
+- Works with existing SSH configurations
 
-### 🚀 **Intelligent Deployment**
-- **node-pty integration** - automatically uses existing node-pty installation on AIX
-- **Graceful fallback** - works with basic terminal if node-pty unavailable
-- **Selective file copying** - only deploys compiled code and package.json
-- **Remote dependency installation** - runs `npm install` on target machine
-- **Process lifecycle management** - start, stop, and health monitoring
-- **Automatic PATH configuration** for Node.js binaries
-
-### 🛠 **Development Experience**
-- **Integrated file explorer** for remote AIX filesystem
-- **Direct file editing** with syntax highlighting
-- **Multiple terminal management** with proper cleanup
-- **Progress indicators** and detailed logging
-- **Command execution** on remote machine
-
-## 🚀 Getting Started
-
-### Prerequisites
+## Requirements
 
 - VS Code 1.74.0 or higher
 - SSH access to AIX machine
-- Node.js installed on AIX machine (typically at `/opt/nodejs/bin/`)
-- SSH key authentication configured (recommended)
-- **Optional**: node-pty installed on AIX for full terminal features
+- Node.js installed on AIX (typically `/opt/nodejs/bin/`)
+- SSH key authentication recommended
 
-### Installation
+For full terminal features, node-pty should be available on the AIX machine.
+
+## Installation
 
 1. Clone this repository
 2. Install dependencies:
@@ -68,90 +48,39 @@ A VS Code extension that enables seamless remote development on AIX machines wit
    npm run compile
    ```
 
-### Usage
+## Usage
 
-1. **Open VS Code** and press `F5` to launch the Extension Development Host
-2. **Connect to AIX machine**:
-   - Open Command Palette (`Ctrl+Shift+P`)
-   - Run "AIX Remote: Connect to AIX Machine"
-   - Enter connection string: `username@hostname` or just `hostname`
-3. **Automatic deployment** will handle the rest:
-   - Creates remote directory structure
-   - Copies compiled server files via SCP
-   - Sets up node-pty if available
-   - Installs dependencies remotely
-   - Starts the WebSocket server
-   - Establishes connection
+1. Open VS Code and press F5 to launch the Extension Development Host
+2. Open Command Palette (Ctrl+Shift+P)
+3. Run "AIX Remote: Connect to AIX Machine"
+4. Enter connection: `username@hostname` or just `hostname`
+5. Extension will automatically deploy and start the server
 
-4. **Use terminal and file operations**:
-   - Browse files using the AIX Remote panel
-   - Open terminals with "AIX Remote: Open AIX Terminal"
-   - Right-click folders for context-specific terminals
-   - Edit files directly in VS Code
+Once connected:
+- Browse files using the AIX Remote panel in Explorer
+- Open terminals with "AIX Remote: Open AIX Terminal"
+- Right-click folders for context-specific terminals
+- Edit files directly in VS Code
 
-## 🏗 Architecture
+## How It Works
 
-```
-┌─────────────────┐    SSH + SCP     ┌─────────────────┐
-│   VS Code       │ ──────────────► │   AIX Machine   │
-│   Extension     │                 │                 │
-│                 │    WebSocket     │   Node.js       │
-│   - File Ops    │ ◄──────────────► │   Server        │
-│   - Terminal    │     Port 8080    │   - File Ops    │
-│   - UI          │                 │   - PTY/Terminal │
-│   - SSH Client  │                 │   - Commands     │
-└─────────────────┘                 └─────────────────┘
-```
+The extension uses SSH to connect to your AIX machine and automatically deploys a Node.js WebSocket server. This server handles file operations and terminal sessions, communicating with VS Code over WebSocket on port 8080.
 
-### Components
+For terminals, the extension uses node-pty when available for full terminal features, or falls back to basic command execution if not available.
 
-- **Extension Host**: VS Code extension with SSH client, terminal provider, and UI components
-- **Remote Server**: Node.js WebSocket server with node-pty integration deployed automatically to AIX
-- **Communication**: JSON-RPC over WebSocket for real-time operations
-- **Terminal Provider**: Full pseudoterminal implementation with PTY support
-- **Deployment**: SCP for file transfer, SSH for command execution
+## Configuration
 
-## 📋 Supported Operations
-
-### File System Operations
-- `fs.readDir` - List directory contents with enhanced metadata
-- `fs.readFile` - Read file contents
-- `fs.writeFile` - Write file contents
-- `fs.stat` - Get file/directory statistics
-
-### Terminal Operations
-- `terminal.create` - Create new PTY-based terminal session
-- `terminal.input` - Send input to terminal
-- `terminal.resize` - Resize terminal dimensions
-- `terminal.kill` - Terminate terminal session
-
-### System Operations
-- `terminal.exec` - Execute shell commands (legacy)
-- `system.info` - Get system information including PTY support
-
-### Server Management
-- Automatic health checks
-- Process lifecycle management
-- Graceful error handling and recovery
-- node-pty auto-detection and setup
-
-## 🔧 Configuration
-
-### SSH Configuration
-
-The extension reads your `~/.ssh/config` file automatically. Example:
+The extension reads your SSH config file automatically. Example:
 
 ```
 Host aix-dev
-    HostName cpap8104.rtp.raleigh.ibm.com
-    User varghese
+    HostName your-aix-machine.com
+    User your-username
     IdentityFile ~/.ssh/id_rsa
-    Port 22
 ```
 
-### Supported Connection Formats
-
-- `username@hostname` - Explicit username and hostname
+You can connect using:
+- `username@hostname` - Direct connection
 - `hostname` - Uses SSH config or current user
 - `aix-dev` - SSH config alias
 
@@ -176,105 +105,53 @@ The extension automatically detects and uses node-pty installations:
 - **Right-click folders**: "Open Terminal Here"
 - **File operations**: Direct file opening from explorer
 
-## 🐛 Troubleshooting
+## Terminal Features
 
-### Common Issues
+**With node-pty (full terminal):**
+- Interactive editors (vi, nano)
+- System monitors (top, htop)
+- Full color and cursor support
+- Terminal resizing
+- Proper signal handling
 
-**Server deployment fails:**
-- Ensure Node.js is installed at `/opt/nodejs/bin/` on AIX
-- Verify SSH key authentication is working
-- Check that `npm` and `node` are in PATH
+**Without node-pty (basic terminal):**
+- Command execution
+- Basic shell interaction
+- Limited interactive program support
 
-**Terminal doesn't work:**
+## Available Commands
+
+- `AIX Remote: Connect to AIX Machine`
+- `AIX Remote: Disconnect from AIX Machine`
+- `AIX Remote: Open AIX Terminal`
+- `AIX Remote: New AIX Terminal`
+
+## Troubleshooting
+
+**Connection issues:**
+- Verify SSH access: `ssh username@hostname`
+- Check Node.js installation on AIX
+- Ensure port 8080 is accessible
+
+**Terminal not working:**
 - Check server logs: `tail -f ~/.aix-remote/server.log`
-- Verify node-pty installation: `cd ~/utility/node-pty && node simple-test.js`
-- Falls back to basic terminal if PTY unavailable
+- Verify node-pty: `cd ~/utility/node-pty && node simple-test.js`
+- Extension falls back to basic terminal if needed
 
-**Connection timeout:**
-- Verify network connectivity to AIX machine
-- Check firewall rules for port 8080
-- Ensure WebSocket traffic is allowed
+**File operations failing:**
+- Check permissions in `~/.aix-remote/`
+- Verify server is running: `ps aux | grep server.js`
 
-**Permission errors:**
-- Verify SSH user has write access to home directory
-- Check file permissions on deployed server files
+## Development
 
-### Debug Information
+The extension consists of:
+- VS Code extension (TypeScript)
+- Node.js server deployed to AIX
+- WebSocket communication layer
+- SSH deployment system
 
-Check these logs for troubleshooting:
-- **VS Code**: Developer Tools Console
-- **AIX Server**: `~/.aix-remote/server.log`
-- **Terminal Type**: Shows in terminal header (Full PTY vs Basic)
+Server logs are available at `~/.aix-remote/server.log` on the AIX machine.
 
-## 🔄 Development Phases
+## License
 
-### ✅ Phase 1: Basic Connectivity
-- SSH connection establishment
-- Manual server deployment
-- Basic WebSocket communication
-
-### ✅ Phase 2: Auto-deployment
-- Automatic server deployment via SCP
-- Remote dependency installation
-- Server lifecycle management
-- Enhanced error handling
-
-### ✅ Phase 3: Full Terminal Integration (Current)
-- **Complete PTY support** with node-pty
-- **Interactive terminal programs** (vi, top, etc.)
-- **Multiple terminal management**
-- **Context-aware terminal creation**
-- **Terminal resizing and proper ANSI support**
-- **Graceful fallback** for basic terminal functionality
-
-### 🔮 Phase 4: Advanced Features (Planned)
-- File watching and sync
-- Debugging integration
-- Multi-machine management
-- Performance optimizations
-- Terminal session persistence
-
-## 🎯 Terminal Features
-
-### Full PTY Mode (with node-pty)
-- ✅ Interactive editors (vi, nano, emacs)
-- ✅ System monitors (top, htop, iostat)
-- ✅ Terminal applications (tmux, screen)
-- ✅ Full ANSI color support
-- ✅ Proper cursor positioning
-- ✅ Terminal resizing
-- ✅ Signal handling (Ctrl+C, Ctrl+Z)
-
-### Basic Mode (fallback)
-- ✅ Command execution
-- ✅ Basic shell interaction
-- ✅ File operations
-- ❌ Limited interactive program support
-
-## 📄 License
-
-MIT License - see LICENSE file for details.
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## 📞 Support
-
-For issues and questions:
-- Check the troubleshooting section above
-- Review VS Code Developer Tools console logs
-- Check remote server logs at `~/.aix-remote/server.log`
-- Verify terminal type in terminal header
-
----
-
-
-### Recent Updates
-- **v0.3.0**: Full terminal integration with node-pty support
-- **v0.2.0**: Automatic server deployment and enhanced file operations
-- **v0.1.0**: Basic connectivity and file browsing
+MIT License
